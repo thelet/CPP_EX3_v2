@@ -1,4 +1,4 @@
-// you@example.com
+// thelet.shevach@gmail.com
 #pragma once
 #include <optional>
 
@@ -8,7 +8,7 @@ struct Action {
     enum class Type {
         Gather,  Tax,    Bribe,
         Arrest,  Sanction, Coup,
-        // role-specific meta actions (all zero-cost)
+        
         Block,   Invest,  SpyPeek
     };
 

@@ -51,14 +51,21 @@ void Game::perform(const Action& a) {
     Player& actor = playerAt(a.actor);
     enforce10CoinRule(actor);
 
-    switch(a.type)
-    {
+    switch(a.type) {
     case Action::Type::Gather:
+        // cannot gather if currently sanctioned
+        if (actor.sanctionedUntilTurn_ >  tick_) {
+            throw IllegalAction("Player is sanctioned and cannot gather");
+        }
         actor.addCoins(1);
         break;
-
+    
     case Action::Type::Tax:
-        actor.addCoins(actor.role()=="Governor" ? 3 : 2);
+        // cannot tax if currently sanctioned
+        if (actor.sanctionedUntilTurn_ > tick_) {
+            throw IllegalAction("Player is sanctioned and cannot tax");
+        }
+        actor.addCoins(actor.role() == "Governor" ? 3 : 2);
         recordBlockable(a);
         break;
 
@@ -67,22 +74,43 @@ void Game::perform(const Action& a) {
         recordBlockable(a);          // Judge may undo later
         return;                      // extra action, keep same turnIdx_
 
-    case Action::Type::Arrest:{
-        if(!a.target)                       throw IllegalAction("Need target");
-        Player& tgt = playerAt(*a.target);
-        if(actor.lastArrested_ == *a.target)throw IllegalAction("Cannot arrest same target twice");
-        tgt.spendCoins(tgt.role()=="Merchant" ? 2 : 1);
-        if(tgt.role()=="General") tgt.addCoins(1);
-        actor.addCoins(1);
+
+    case Action::Type::Arrest: {
+        if (!a.target) {
+            throw IllegalAction("Need target");
+        }
+        Player& tgt   = playerAt(*a.target);
+        // cannot arrest the same target twice in a row
+        if (actor.lastArrested_ == *a.target) {
+            throw IllegalAction("Cannot arrest same target twice");
+        }
+
+        const std::string &role = tgt.role();
+        if (role == "Merchant") {
+            // Merchant loses 2 coins; arresting player gets no coin.
+            tgt.spendCoins(2);
+        }
+        else if (role == "General") {
+            // General loses nothing; arresting player still earns 1 coin.
+            actor.addCoins(1);
+        }
+        else {
+            // All others lose 1, and arresting player gains 1.
+            tgt.spendCoins(1);
+            actor.addCoins(1);
+        }
+
         actor.lastArrested_ = *a.target;
-        break;}
+        break;
+    }
+
 
     case Action::Type::Sanction:{
         if(!a.target)                       throw IllegalAction("Need target");
         Player& tgt = playerAt(*a.target);
         actor.spendCoins(3);
         tgt.sanctionedUntilTurn_ = tick_ + roster_.size();
-        if(tgt.role()=="Baron")  actor.addCoins(1);
+        if(tgt.role()=="Baron")  tgt.addCoins(1);
         if(tgt.role()=="Judge")  actor.spendCoins(1);
         break;}
 

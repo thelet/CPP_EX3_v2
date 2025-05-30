@@ -1,7 +1,6 @@
-#───────────────────────────────────────────────────────────────────────────────
-#  Coup – professional Makefile
-#  you@example.com
-#───────────────────────────────────────────────────────────────────────────────
+
+# thelet.shevach@gmail.com
+
 
 CXX       := g++
 CXXFLAGS  := -std=c++20 -Wall -Wextra -pedantic -Iinclude

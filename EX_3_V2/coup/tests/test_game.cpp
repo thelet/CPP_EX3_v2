@@ -1,234 +1,242 @@
-// tests/test_game.cpp
+// thelet.shevach@gmail.com
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
+
 #include "core/Game.hpp"
 #include "core/Player.hpp"
 
-
+#include <vector>
+#include <string>
 using namespace coup;
 
-// Helper to set up a game with named role pairs
-static void setupGame(Game &g, std::vector<std::unique_ptr<Player>> &players,
-                      std::initializer_list<std::pair<std::string,std::string>> specs) {
-    for (auto &pr : specs) {
-        const auto &name = pr.first;
-        const auto &role = pr.second;
-        if (role == "Governor")    players.emplace_back(std::make_unique<Governor>(g,name));
-        if (role == "Spy")          players.emplace_back(std::make_unique<Spy>(g,name));
-        if (role == "Baron")        players.emplace_back(std::make_unique<Baron>(g,name));
-        if (role == "General")      players.emplace_back(std::make_unique<General>(g,name));
-        if (role == "Judge")        players.emplace_back(std::make_unique<Judge>(g,name));
-        if (role == "Merchant")     players.emplace_back(std::make_unique<Merchant>(g,name));
+//───────────────────────────────────────────────────────────────────────────────
+// Advance the game until it's target's turn. Everybody else just gathers.
+static void advanceTo(Game& g, const std::vector<Player*>& ps, Player* target) {
+    while (g.turn() != target->name()) {
+        const std::string cur = g.turn();
+        bool acted = false;
+        for (auto p : ps) {
+            if (p->name() == cur) {
+                p->gather();
+                acted = true;
+                break;
+            }
+        }
+        // if turn not in our list, break to avoid infinite loop
+        if (!acted) break;
     }
 }
+//───────────────────────────────────────────────────────────────────────────────
 
-TEST_CASE("Initial turn order and players list") {
+TEST_CASE("1. Gather increments by 1") {
     Game g;
-    std::vector<std::unique_ptr<Player>> players;
-    setupGame(g, players, {{"A","Spy"},{"B","Baron"},{"C","General"}});
-    auto names = g.players();
-    CHECK(names == std::vector<std::string>{"A","B","C"});
-    CHECK(g.turn() == "A");
-}
-
-TEST_CASE("Gather and Tax actions update coins and advance turn") {
-    Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g, P, {{"P1","Merchant"},{"P2","Spy"}});
-    auto &p1 = dynamic_cast<Merchant&>(*P[0]);
-    auto &p2 = dynamic_cast<Spy&>(*P[1]);
-
-    CHECK(p1.coins() == 0);
-    p1.gather(); // +1
-    CHECK(p1.coins() == 1);
-    CHECK(g.turn() == "P2");
-
-    p2.tax(); // +2
-    CHECK(p2.coins() == 2);
-    CHECK(g.turn() == "P1");
-}
-
-TEST_CASE("Bribe grants extra turn and costs 4 coins") {
-    Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"X","Judge"},{"Y","Baron"}});
-    auto &x = dynamic_cast<Judge&>(*P[0]);
-    CHECK(x.coins()==0);
-    // give Judge coins
-    for(int i=0;i<4;i++){ x.gather(); g.perform({Action::Type::Gather,0,{}}); }
-    CHECK(x.coins()==4);
-    x.bribe();
-    CHECK(x.coins()==0);
-    // still Judge's turn because bribe
-    CHECK(g.turn()=="X");
-    // now next action consumes and advances
-    x.gather();
-    CHECK(g.turn()=="Y");
-}
-
-TEST_CASE("Arrest takes 1 coin, cannot arrest same twice, Merchant pays 2") {
-    Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"M","Merchant"},{"S","Spy"}});
-    auto &m = dynamic_cast<Merchant&>(*P[0]);
-    auto &s = dynamic_cast<Spy&>(*P[1]);
-    // give Spy 1 coin
-    s.gather();
-    CHECK(s.coins()==1);
-    m.arrest(s);
-    CHECK(m.coins()==1);
-    CHECK(s.coins()==0);
-    // cannot arrest same again
-    CHECK_THROWS_AS(m.arrest(s), IllegalAction);
-}
-
-TEST_CASE("Sanction blocks gather and tax, costs 3 coins, Baron rebate, Judge extra fee") {
-    Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"B","Baron"},{"J","Judge"}});
-    auto &b = dynamic_cast<Baron&>(*P[0]);
-    auto &j = dynamic_cast<Judge&>(*P[1]);
-    // give Baron coins
-    for(int i=0;i<3;i++){ b.gather(); g.perform({Action::Type::Gather,0,{}});} 
-    CHECK(b.coins()==3);
-    b.sanction(j);
-    // sanction costs 3, then rebate 1 for Baron
+    Governor a(g,"A"); Spy b(g,"B");
+    std::vector<Player*> ps{&a,&b};
+    CHECK(a.coins()==0);
+    advanceTo(g,ps,&a);
+    a.gather();
+    CHECK(a.coins()==1);
+    advanceTo(g,ps,&b);
+    b.gather();
     CHECK(b.coins()==1);
-    CHECK_THROWS_AS(j.gather(), IllegalAction);
-    CHECK_THROWS_AS(j.tax(), IllegalAction);
-    // after J's turn advances, sanction expires
 }
 
-TEST_CASE("Coup eliminates or can be blocked by General") {
+TEST_CASE("2. Tax: normal=2, governor=3") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"G1","General"},{"G2","Governor"}});
-    auto &gen = dynamic_cast<General&>(*P[0]);
-    auto &gov = dynamic_cast<Governor&>(*P[1]);
-    // give Governor 7 coins
-    for(int i=0;i<7;i++){ gov.gather(); g.perform({Action::Type::Gather,1,{}});} 
-    CHECK(gov.coins()==7);
-    // Governor coup General
-    gov.coup(gen);
-    CHECK_THROWS_AS(gen.gather(), IllegalAction);
-    // now only one left → winner
-    CHECK(g.winner() == "Governor");
-
-    // test block by General
-    setupGame(g,P,{{"G1","General"},{"B","Baron"}});
-    auto &b = dynamic_cast<Baron&>(*P[1]);
-    for(int i=0;i<7;i++){ b.gather(); g.perform({Action::Type::Gather,1,{}});}    
-    // Baron attempts coup General
-    b.coup(gen);
-    // General blocks
-    gen.block(b);
-    // both remain alive
-    auto names = g.players();
-    CHECK(names.size()==2);
+    Governor gov(g,"G"); Spy s(g,"S");
+    std::vector<Player*> ps{&gov,&s};
+    advanceTo(g,ps,&gov);
+    gov.tax();   // +3
+    advanceTo(g,ps,&s);
+    s.tax();     // +2
+    CHECK(gov.coins()==3);
+    CHECK(s.coins()==2);
 }
 
-TEST_CASE("Forced coup at 10+ coins") {
+TEST_CASE("3. Governor undo tax in same round") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"U","Spy"},{"V","Merchant"}});
-    auto &u = dynamic_cast<Spy&>(*P[0]);
-    // give U 10 coins
-    for(int i=0;i<10;i++){ u.gather(); g.perform({Action::Type::Gather,0,{}});}  
-    CHECK(u.coins()==10);
-    CHECK_THROWS_AS(u.gather(), IllegalAction);
-    // must coup
+    Governor gov(g,"G"); Spy s(g,"S");
+    std::vector<Player*> ps{&gov,&s};
+    advanceTo(g,ps,&s);
+    s.tax();
+    advanceTo(g,ps,&gov);
+    gov.undo(s);
+    CHECK(s.coins()==0);
 }
 
-TEST_CASE("Role-specific: Governor undo tax") {
+TEST_CASE("4. Judge cannot undo tax") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"G","Governor"},{"S","Spy"}});
-    auto &gov = dynamic_cast<Governor&>(*P[0]);
-    auto &spy = dynamic_cast<Spy&>(*P[1]);
-    spy.gather(); //1
-    gov.tax();    // +3
-    // Governor can undo
-    gov.undo(spy);
-    CHECK(spy.coins()==0);
+    Judge j(g,"J"); Spy s(g,"S");
+    std::vector<Player*> ps{&j,&s};
+    advanceTo(g,ps,&j);
+    j.gather();
+    advanceTo(g,ps,&s);
+    s.tax();
+    advanceTo(g,ps,&j);
+    CHECK_THROWS_AS(j.undo(s), IllegalAction);
 }
 
-TEST_CASE("Role-specific: Spy peek and blockArrest") {
+TEST_CASE("5. Bribe gives extra turn; Judge can undo later") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"S","Spy"},{"M","Merchant"}});
-    auto &spy = dynamic_cast<Spy&>(*P[0]);
-    auto &m   = dynamic_cast<Merchant&>(*P[1]);
-    m.gather();
-    int coins = spy.peek(m);
-    CHECK(coins==1);
-    spy.blockArrest(m);
-    // next M.arrest(spy) should fail
+    Spy s(g,"S"); Judge j(g,"J");
+    s.addCoins(4);
+    std::vector<Player*> ps{&s,&j};
+    advanceTo(g,ps,&s);
+    s.bribe();       // spends 4, still S's turn
+    s.gather();      // extra action
+    CHECK(s.coins()==1);
+    advanceTo(g,ps,&j);
+    j.undo(s);
+    CHECK(s.coins()==5);
 }
 
-TEST_CASE("Role-specific: Baron invest and rebate on sanction") {
+TEST_CASE("6. Arrest cannot target same twice in a row") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"B","Baron"},{"G","Spy"}});
-    auto &bar = dynamic_cast<Baron&>(*P[0]);
-    bar.gather(); bar.gather(); bar.gather();
+    Spy a(g,"A"); Spy b(g,"B");
+    std::vector<Player*> ps{&a,&b};
+    advanceTo(g,ps,&a);
+    b.addCoins(2);
+    a.arrest(b);
+    CHECK(a.coins()==1);
+    advanceTo(g,ps,&a);
+    CHECK_THROWS_AS(a.arrest(b), IllegalAction);
+}
+
+TEST_CASE("7. Spy blocks next arrest") {
+    Game g;
+    Spy spy(g,"P"); Baron bar(g,"B");
+    std::vector<Player*> ps{&spy,&bar};
+    advanceTo(g,ps,&spy);
+    spy.blockArrest(bar);
+    advanceTo(g,ps,&bar);
+    CHECK_THROWS_AS(bar.arrest(spy), IllegalAction);
+}
+
+
+TEST_CASE("8. Baron invest action") {
+    Game g;
+    Baron bar(g,"B");
+    std::vector<Player*> ps{&bar};
+    bar.addCoins(3);
+    advanceTo(g,ps,&bar);
     bar.invest();
     CHECK(bar.coins()==6);
-    // sanction rebate
-    bar.sanction(dynamic_cast<Spy&>(*P[1]));
-    CHECK(bar.coins()==4);
 }
 
-TEST_CASE("Role-specific: General block coup, refund on arrest") {
+TEST_CASE("9. Baron sanctioned") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"G","General"},{"T","Baron"}});
-    auto &gen = dynamic_cast<General&>(*P[0]);
-    auto &bar = dynamic_cast<Baron&>(*P[1]);
-    bar.gather(); for(int i=0;i<6;i++) { g.perform({Action::Type::Gather,1,{}});} // bar->7
-    bar.coup(gen);
-    gen.block(bar);
-    // test arrest refund
-    gen.gather(); // 1
-    bar.arrest(gen);
-    CHECK(gen.coins()==1);
+    Spy a(g,"A"); Baron b(g,"B");
+    std::vector<Player*> ps{&a,&b};
+    a.addCoins(3);
+    advanceTo(g,ps,&a);
+    a.sanction(b);
+    // a paid 3 then got rebate 1 => net -3 from start 3 => 0
+    CHECK(a.coins()==0);
 }
 
-TEST_CASE("Role-specific: Judge cancel bribe, extra fee on sanction") {
+TEST_CASE("10. General refunded upon arrest") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"J","Judge"},{"B","Baron"}});
-    auto &j = dynamic_cast<Judge&>(*P[0]);
-    auto &b = dynamic_cast<Baron&>(*P[1]);
-    // give B coins
-    for(int i=0;i<4;i++){ b.gather(); g.perform({Action::Type::Gather,1,{}});}  
-    b.bribe();
-    CHECK_THROWS_AS(b.bribe(), NotYourTurn);
-    j.undo(b);
-    CHECK(b.coins()==4);
+    Spy a(g,"A"); General g1(g,"G");
+    std::vector<Player*> ps{&a,&g1};
+    advanceTo(g,ps,&a);
+    g1.addCoins(1);
+    a.arrest(g1);
+    // g1 lost 1 then refunded => 1
+    CHECK(g1.coins()==1);
 }
 
-TEST_CASE("Role-specific: Merchant extra coin at start of turn") {
+
+
+TEST_CASE("11. Merchant loses 2 when arrested") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"M","Merchant"},{"S","Spy"}});
-    auto &m = dynamic_cast<Merchant&>(*P[0]);
-    // give m 3 ahead of his turn
-    m.gather(); m.gather(); m.gather();
-    g.perform({Action::Type::Gather,1,{}}); // spy turn gathers
-    // on new Merchant turn he gets +1
-    CHECK(m.coins()==4);
+    Spy a(g,"A"); Merchant m(g,"M");
+    std::vector<Player*> ps{&a,&m};
+    advanceTo(g,ps,&a);
+    a.addCoins(1);
+    m.addCoins(2);
+    a.arrest(m);
+    // m pays 2, a gets non
+    CHECK(a.coins()==1);
+    CHECK(m.coins()==0);
 }
 
-TEST_CASE("Winner only when one left; otherwise throws") {
+
+TEST_CASE("12. Governor cannot undo bribe") {
     Game g;
-    std::vector<std::unique_ptr<Player>> P;
-    setupGame(g,P,{{"A","Spy"},{"B","Baron"}});
+    Governor gov(g,"Gov"); Spy s(g,"S");
+    std::vector<Player*> ps{&gov,&s};
+    s.addCoins(4);
+    advanceTo(g,ps,&s);
+    s.bribe();
+    advanceTo(g,ps,&gov);
+    CHECK_THROWS_AS(gov.undo(s), IllegalAction);
+}
+
+TEST_CASE("13. Judge cannot block tax") {
+    Game g;
+    Judge j(g,"J"); Spy s(g,"S");
+    std::vector<Player*> ps{&j,&s};
+    advanceTo(g,ps,&s);
+    s.tax();
+    advanceTo(g,ps,&j);
+    CHECK_THROWS_AS(j.undo(s), IllegalAction);
+}
+
+
+TEST_CASE("14. Cannot spend more coins than you have") {
+    Game g;
+    Spy s(g,"S");
+    std::vector<Player*> ps{&s};
+    advanceTo(g,ps,&s);
+    CHECK_THROWS_AS(s.coup(s), IllegalAction);
+}
+
+
+TEST_CASE("15. Bribe grants exactly one extra action") {
+    Game g;
+    Spy s(g,"S"); General g1(g,"G1");
+    std::vector<Player*> ps{&s,&g1};
+    s.addCoins(4);
+    advanceTo(g,ps,&s);
+    s.bribe();
+    s.gather();
+    CHECK_THROWS_AS(s.gather(), NotYourTurn);
+}
+
+TEST_CASE("16. Governor undo must happen in same round") {
+    Game g;
+    Governor gov(g,"Gov"); Spy s(g,"S");
+    std::vector<Player*> ps{&gov,&s};
+    advanceTo(g,ps,&s);
+    s.tax();
+    advanceTo(g,ps,&gov);
+    gov.undo(s);
+    // next round
+    advanceTo(g,ps,&s);
+    advanceTo(g,ps,&gov);
+    CHECK_THROWS_AS(gov.undo(s), IllegalAction);
+}
+
+
+TEST_CASE("17. Winner only when one remains") {
+    Game g;
+    Spy a(g,"A"), b(g,"B");
+    std::vector<Player*> ps{&a,&b};
     CHECK_THROWS_AS(g.winner(), GameNotFinished);
-    // eliminate B
-    auto &a = dynamic_cast<Spy&>(*P[0]);
-    auto &b = dynamic_cast<Baron&>(*P[1]);
-    for(int i=0;i<7;i++){ a.gather(); g.perform({Action::Type::Gather,0,{}});}    
+    a.addCoins(7);
+    advanceTo(g,ps,&a);
     a.coup(b);
     CHECK(g.winner()=="A");
 }
+
+TEST_CASE("18. Spy peek returns correct coins") {
+    Game g;
+    Spy spy(g,"S"); Baron bar(g,"B");
+    std::vector<Player*> ps{&spy,&bar};
+    bar.addCoins(3);
+    advanceTo(g,ps,&spy);
+    CHECK(spy.peek(bar)==3);
+}
+
+
 

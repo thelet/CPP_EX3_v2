@@ -1,4 +1,4 @@
-// you@example.com
+// thelet.shevach@gmail.com
 #pragma once
 
 #include <vector>
@@ -18,9 +18,7 @@ class Game {
     std::size_t          turnIdx_{0};  // whose turn (index into roster_)
     std::size_t          tick_{0};     // “full-turns” counter
 
-    /* pending_  – for an action that *must* be answered before the
-       next player acts (we use it only for the extra‐action effect
-       of Bribe, so the actor can act again immediately).           */
+
     std::optional<Action> pending_;
 
     /* lastBlockable_ – remembers the most-recent Tax / Bribe / Coup
@@ -48,6 +46,14 @@ public:
     std::vector<std::string> players() const;   // living players
     const std::string&       turn()    const;   // whose turn name
     std::string              winner()  const;   // last survivor
+
+    const std::vector<Player*>& roster()  const { return roster_; }
+    bool                        alive(std::size_t i) const { return alive_.at(i); }
+    std::size_t                 turnIndex()  const { return turnIdx_; }
+    std::size_t                 tick()       const { return tick_; }
+
+
+
 
     /* ---- engine services ----------------------------------- */
     std::size_t indexOf(const Player& p) const;
